@@ -1,0 +1,110 @@
+#include <SPI.h>
+#include <LoRa.h>
+#include "DFRobot_PH.h"
+#include <EEPROM.h>
+#include "GravityTDS.h"
+#define TdsSensorPin A0
+GravityTDS gravityTds;
+int potPin = A0;
+float ph;
+float Value = 0;
+#define PH_PIN A1
+float voltage, phValue, temperature = 25, tdsValue = 0;
+DFRobot_PH pH;
+
+
+int potPinph = A1;
+float Valueph = 0;
+
+int counter = 0;
+const int id = 2;
+
+unsigned long last_time = 0;
+
+#define ss 53
+#define rst 10
+#define dio0 9
+#define en 30
+
+#include <OneWire.h>          
+#include <DallasTemperature.h>  
+
+#define ONE_WIRE_BUS 4  
+
+OneWire oneWire(ONE_WIRE_BUS);  
+DallasTemperature sDS18B20(&oneWire);
+
+
+
+void setup() {
+  Serial.begin(115200);
+  pH.begin();
+  pinMode(en, OUTPUT);
+
+  digitalWrite(en, HIGH);
+
+  while (!Serial)
+    ;
+  Serial.println("LoRa Sender");
+
+
+  LoRa.setPins(ss, rst, dio0);
+
+  while (!LoRa.begin(915E6)) {
+    Serial.println(".");
+    delay(500);
+  }
+
+  LoRa.setSyncWord(0xF3);
+  Serial.println("LoRa Initializing OK!");
+  gravityTds.setPin(TdsSensorPin);
+  gravityTds.setAref(5);        
+  gravityTds.setAdcRange(4096); 
+  gravityTds.begin();            
+  pinMode(A0, INPUT);
+  pinMode(A1, INPUT);
+  sDS18B20.begin();
+}
+
+void loop() {
+
+  unsigned long current_time = millis();
+  gravityTds.setTemperature(temperature); 
+  gravityTds.update();                    
+  tdsValue = gravityTds.getTdsValue();     
+  Serial.print(tdsValue, 0);
+  Serial.println("ppm");
+  Value = analogRead(potPin);
+  Serial.print(Value);
+
+  static unsigned long timepoint = millis();
+  if (millis() - timepoint > 1000U) {  
+    timepoint = millis();
+    voltage = analogRead(PH_PIN) / 1024.0 * 5000; 
+    phValue = pH.readPH(voltage, temperature);  
+    Serial.print("pH:");
+    Serial.println(phValue);
+  }
+  pH.calibration(voltage, temperature);  
+
+  sDS18B20.requestTemperatures(); 
+  Serial.print("Suhu: ");
+  Serial.println(sDS18B20.getTempCByIndex(0)); 
+  float temp = sDS18B20.getTempCByIndex(0);
+
+  String packet_to_send = String(String(id) + '#' + String(temp) + '#' + String(tdsValue, 1) + '#' + String(phValue, 1));
+
+
+  if (current_time - last_time > 120000) {
+    last_time = current_time;
+
+    LoRa.beginPacket();
+    LoRa.print(packet_to_send);
+    LoRa.endPacket();
+    Serial.print("Sending packet: ");
+    Serial.println(packet_to_send);
+    Serial.print("Packet: ");
+    Serial.println(counter);
+    counter++;
+  }
+}
